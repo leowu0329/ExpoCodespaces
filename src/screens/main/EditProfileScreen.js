@@ -3,7 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, 
   ScrollView, ActivityIndicator, Modal 
 } from 'react-native';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore'; // 引入 onSnapshot
 import { auth, db } from '../../config/firebase';
 import { AuthContext } from '../../context/AuthContext';
 
@@ -27,19 +27,22 @@ export default function EditProfileScreen({ navigation }) {
 
   // 自訂 Modal 彈窗狀態
   const [modalVisible, setModalVisible] = useState(false);
-  const [modalType, setModalType] = useState('success'); // 'success' 或 'error'
+  const [modalType, setModalType] = useState('success');
   const [modalTitle, setModalTitle] = useState('');
   const [modalMessage, setModalMessage] = useState('');
 
-  // 進入頁面時讀取既有用戶資料
+  // 即時監聽 Firestore 資料變動
   useEffect(() => {
-    const fetchUserData = async () => {
-      if (!user) return;
-      try {
-        const userDocRef = doc(db, 'users', user.uid);
-        const userDoc = await getDoc(userDocRef);
-        if (userDoc.exists()) {
-          const data = userDoc.data();
+    if (!user) return;
+
+    const userDocRef = doc(db, 'users', user.uid);
+
+    // 使用 onSnapshot 建立即時監聽器
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      (docSnapshot) => {
+        if (docSnapshot.exists()) {
+          const data = docSnapshot.data();
           setName(data.name || '');
           setBirthday(data.birthday || '');
           setPhone(data.phone || '');
@@ -50,17 +53,19 @@ export default function EditProfileScreen({ navigation }) {
           setRole(data.role || '訪客');
           setAddress(data.address || '');
         }
-      } catch (error) {
-        console.error("讀取用戶資料失敗：", error);
-      } finally {
+        setFetching(false);
+      },
+      (error) => {
+        console.error("即時監聽用戶資料失敗：", error);
         setFetching(false);
       }
-    };
+    );
 
-    fetchUserData();
+    // 當元件卸載 (unmount) 時取消監聽，避免記憶體洩漏
+    return () => unsubscribe();
   }, [user]);
 
-  // 顯示 Modal 的輔助函式
+  // 顯示 Modal 彈窗
   const showModal = (type, title, message) => {
     setModalType(type);
     setModalTitle(title);
@@ -68,11 +73,11 @@ export default function EditProfileScreen({ navigation }) {
     setModalVisible(true);
   };
 
-  // 關閉 Modal 並根據結果決定是否跳轉
+  // 關閉 Modal 並在成功時跳轉至首頁
   const handleModalConfirm = () => {
     setModalVisible(false);
     if (modalType === 'success') {
-      navigation.navigate('Home'); // 修改成功後跳轉至首頁
+      navigation.navigate('Home');
     }
   };
 
@@ -97,10 +102,8 @@ export default function EditProfileScreen({ navigation }) {
         updatedAt: new Date()
       }, { merge: true });
 
-      // 成功彈窗
       showModal('success', '修改成功', '個人資訊已更新完畢！點擊確定返回首頁。');
     } catch (error) {
-      // 失敗彈窗
       showModal('error', '修改失敗', '儲存資料時發生錯誤：' + error.message);
     } finally {
       setLoading(false);
